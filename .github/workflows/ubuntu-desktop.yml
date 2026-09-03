@@ -1,4 +1,4 @@
-name: Ubuntu Cloud Desktop (Tailscale + XRDP)
+name: Ubuntu Cloud Desktop
 
 on:
   workflow_dispatch:
@@ -6,58 +6,53 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 360 # حداکثر زمان مجاز برای اکانت‌های رایگان گیت‌هاب (۶ ساعت)
+    timeout-minutes: 360
 
     steps:
-      - name: 1. Install Desktop Environment & XRDP
+      - name: 1. Install Desktop & XRDP
         run: |
-          sudo apt-get update
-          # نصب محیط دسکتاپ سبک XFCE و سرور ریموت دسکتاپ
-          sudo apt-get install -y xfce4 xfce4-goodies xrdp
-          
-          # فعال‌سازی و شروع سرویس xrdp
-          sudo systemctl enable xrdp
-          sudo systemctl start xrdp
-          
-          # تنظیم XFCE به عنوان محیط پیش‌فرض برای اتصالات ریموت
+          export DEBIAN_FRONTEND=noninteractive
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xfce4 xfce4-goodies xrdp dbus-x11 x11-xserver-utils > /dev/null 2>&1
+
           echo "xfce4-session" > ~/.xsession
+          chmod +x ~/.xsession
           sudo cp ~/.xsession /etc/skel/
-          sudo sed -i '0,/-1/s//ask-1/' /etc/xrdp/xrdp.ini
 
-      - name: 2. Set User Password
+          sudo sed -i 's|^test -x /etc/X11/Xsession.*|#&|' /etc/xrdp/startwm.sh
+          echo "startxfce4" | sudo tee -a /etc/xrdp/startwm.sh > /dev/null
+
+          sudo systemctl enable xrdp
+          sudo systemctl restart xrdp
+
+      - name: 2. Set Password
         run: |
-          # تنظیم رمز عبور برای کاربر پیش‌فرض ubuntu
-          echo "ubuntu:P@ssw0rd1qazXSW@#" | sudo chpasswd
-          # اطمینان از دسترسی کاربر به فایل‌های پیکربندی
-          sudo adduser ubuntu ssl-cert
+          sudo sed -i 's/password\s\+requisite\s\+pam_pwquality.so/#&/' /etc/pam.d/common-password 2>/dev/null || true
+          sudo usermod -p "$(openssl passwd -6 'P@ssw0rd1qazXSW@#')" ubuntu
+          sudo adduser ubuntu ssl-cert 2>/dev/null || true
 
-      - name: 3. Install & Connect Tailscale VPN
+      - name: 3. Install Tailscale & Connect
         env:
           TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
         run: |
-          # دانلود و نصب اسکریپت رسمی Tailscale
           curl -fsSL https://tailscale.com/install.sh | sh
-          
-          # اتصال به شبکه Tailscale
-          sudo tailscale up --authkey="$TAILSCALE_AUTHKEY" --hostname="github-ubuntu-desktop"
-          
+          sudo tailscale up --authkey="$TAILSCALE_AUTHKEY" --hostname="ubuntu-rdp"
           sleep 5
-          
-          # دریافت آی‌پی Tailscale
           TS_IP=$(tailscale ip -4)
-          
-          echo ""
-          echo "==========================================================" 
-          echo "  >>> UBUNTU DESKTOP IS READY! <<<" 
-          echo "  Tailscale IP : $TS_IP" 
-          echo "  Username     : ubuntu" 
-          echo "  Password     : P@ssw0rd1qazXSW@#" 
-          echo "  >> Open mstsc (Remote Desktop) and connect to: $TS_IP" 
-          echo "==========================================================" 
 
-      - name: 4. Keep Server Alive
+          echo ""
+          echo "============================================"
+          echo "  UBUNTU DESKTOP IS READY"
+          echo "============================================"
+          echo "  IP       : $TS_IP"
+          echo "  Username : ubuntu"
+          echo "  Password : P@ssw0rd1qazXSW@#"
+          echo "  Port     : 3389"
+          echo "============================================"
+
+      - name: 4. Keep Alive
         run: |
-          for i in {1..2880}; do
-            echo "[$i/2880] Server running..."
+          while true; do
+            echo "[$(date)] Server running..."
             sleep 60
           done
